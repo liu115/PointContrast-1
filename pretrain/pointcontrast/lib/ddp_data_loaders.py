@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-# 
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -12,6 +12,7 @@ import numpy as np
 import glob
 import os
 import copy
+import json
 from tqdm import tqdm
 from scipy.linalg import expm, norm
 
@@ -22,7 +23,8 @@ import MinkowskiEngine as ME
 import open3d as o3d
 
 from torch.utils.data.sampler import RandomSampler
-from lib.data_sampler import DistributedInfSampler
+from lib.data_sampler import InfSampler, DistributedInfSampler
+from lib.point_cloud import load_pointcloud
 
 
 def make_open3d_point_cloud(xyz, color=None):
@@ -66,22 +68,22 @@ def default_collate_pair_fn(list_data):
     # Move batchids to the beginning
     xyz_batch0.append(torch.from_numpy(xyz0[batch_id]))
     coords_batch0.append(
-        torch.cat((torch.ones(N0, 1).int() * batch_id, 
+        torch.cat((torch.ones(N0, 1).int() * batch_id,
                    torch.from_numpy(coords0[batch_id]).int()), 1))
     feats_batch0.append(torch.from_numpy(feats0[batch_id]))
 
     xyz_batch1.append(torch.from_numpy(xyz1[batch_id]))
     coords_batch1.append(
-        torch.cat((torch.ones(N1, 1).int() * batch_id, 
+        torch.cat((torch.ones(N1, 1).int() * batch_id,
                    torch.from_numpy(coords1[batch_id]).int()), 1))
     feats_batch1.append(torch.from_numpy(feats1[batch_id]))
 
     trans_batch.append(torch.from_numpy(trans[batch_id]))
-    
+
     # in case 0 matching
     if len(matching_inds[batch_id]) == 0:
       matching_inds[batch_id].extend([0, 0])
-    
+
     matching_inds_batch.append(
         torch.from_numpy(np.array(matching_inds[batch_id]) + curr_start_inds))
     len_batch.append([N0, N1])
@@ -121,12 +123,12 @@ def sample_random_rts(pcd, randg, rotation_range=360, scale_range=None, translat
   R = M(randg.rand(3) - 0.5, rotation_range * np.pi / 180.0 * (randg.rand(1) - 0.5))
   T_rot[:3, :3] = R
   T_rot[:3, 3] = R.dot(-np.mean(pcd, axis=0))
-  
+
   T_scale = np.eye(4)
   if scale_range:
       scale = np.random.uniform(*scale_range)
       np.fill_diagonal(T_scale[:3, :3], scale)
-  
+
   T_translation = np.eye(4)
   if translation_range:
     offside = np.random.uniform(*translation_range, 3)
@@ -163,22 +165,37 @@ class ScanNetMatchPairDataset(torch.utils.data.Dataset):
     self.random_rotation = random_rotation
     self.rotation_range = config.trainer.rotation_range
     self.randg = np.random.RandomState()
-    
+
     if manual_seed:
       self.reset_seed()
-    
-    self.root_filelist = root = config.data.scannet_match_dir
-    self.root = config.data.dataset_root_dir
-    logging.info(f"Loading the subset {phase} from {root}")
-    if phase == "train":
-       fname_txt = os.path.join(self.root, self.root_filelist)
-       with open(fname_txt) as f:
-         content = f.readlines()
-       fnames = [x.strip().split() for x in content]
-       for fname in fnames:
-         self.files.append([fname[0], fname[1]])
-    else:
-        raise NotImplementedError
+
+    self.data_root = config.data.dataset_root_dir
+    self.pair_dir = config.data.dataset_pair_dir
+    self.split_file = config.data.split_file
+
+    pair_list = glob.glob(self.pair_dir + "/*.json")
+    with open(self.split_file, 'r') as fp:
+      scene_names = [name.strip() for name in fp.readlines()]
+    # filter_pair_list = []
+    pair_list = [fn for fn in pair_list if fn[-17:-5] in scene_names]
+    print(len(pair_list))
+
+    for pair_fn in pair_list:
+        with open(pair_fn, 'r') as fp:
+            self.files.extend(json.load(fp))
+    print(len(self.files))
+    # self.root_filelist = root = config.data.scannet_match_dir
+    # self.root = config.data.dataset_root_dir
+    # logging.info(f"Loading the subset {phase} from {root}")
+    # if phase == "train":
+    #    fname_txt = os.path.join(self.root, self.root_filelist)
+    #    with open(fname_txt) as f:
+    #      content = f.readlines()
+    #    fnames = [x.strip().split() for x in content]
+    #    for fname in fnames:
+    #      self.files.append([fname[0], fname[1]])
+    # else:
+    #     raise NotImplementedError
 
   def reset_seed(self, seed=0):
     logging.info(f"Resetting the data loader seed to {seed}")
@@ -189,18 +206,37 @@ class ScanNetMatchPairDataset(torch.utils.data.Dataset):
     T = trans[:3, 3]
     pts = pts @ R.T + T
     return pts
-  
+
   def __len__(self):
     return len(self.files)
 
+  # def load_pcd(self, fn):
+  #   data_root = '/work/trainer5566/scannetv2_data_clean'
+  #   scene_name = fn.split('/')[-3]
+  #   frame_id = fn.split('/')[-1].split('.')[0]
+  #   frame_id = frame_id.zfill(6)
+  #   return load_pointcloud(data_root, scene_name, frame_id)
+  def load_pcd(self, idx):
+      scene_name = self.files[idx]['scene_name']
+      frame0_id = self.files[idx]['frame0_id']
+      frame1_id = self.files[idx]['frame1_id']
+      xyz0 = load_pointcloud(self.data_root, scene_name, frame0_id)
+      xyz1 = load_pointcloud(self.data_root, scene_name, frame1_id)
+      return xyz0, xyz1
+
   def __getitem__(self, idx):
-    file0 = os.path.join(self.root, self.files[idx][0])
-    file1 = os.path.join(self.root, self.files[idx][1])
-    data0 = np.load(file0)
-    data1 = np.load(file1)
-    xyz0 = data0["pcd"]
-    xyz1 = data1["pcd"]
-    
+    # file0 = os.path.join(self.root, self.files[idx][0])
+    # file1 = os.path.join(self.root, self.files[idx][1])
+
+    # data0 = np.load(file0)
+    # data1 = np.load(file1)
+    # xyz0 = data0["pcd"]
+    # xyz1 = data1["pcd"]
+    # xyz0 = self.load_pcd(file0)
+    # xyz1 = self.load_pcd(file1)
+    # use my own pair_dir
+    xyz0, xyz1 = self.load_pcd(idx)
+
     #dummy color
     color0 = np.ones((xyz0.shape[0], 3))
     color1 = np.ones((xyz1.shape[0], 3))
@@ -294,8 +330,8 @@ def make_data_loader(config, batch_size, num_threads=0):
   if config.misc.num_gpus > 1:
     sampler = DistributedInfSampler(dset)
   else:
-    sampler = None
-  
+    sampler = InfSampler(dset)
+
   loader = torch.utils.data.DataLoader(
       dset,
       batch_size=batch_size,
