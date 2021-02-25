@@ -5,28 +5,31 @@
 
 
 import torch
-import hydra
+#import hydra
 import logging
 import sys
 import os
 import numpy as np
 import torch.nn as nn
 import importlib
+import json
 
-from omegaconf import OmegaConf
+#from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from torch.serialization import default_restore_location
 from lib.train import train
 from lib.test import test
-
+import yaml
+from attrdict import AttrDict
 
 def setup_logging():
   ch = logging.StreamHandler(sys.stdout)
+  ch2 = logging.FileHandler('myLog.log')
   logging.getLogger().setLevel(logging.INFO)
   logging.basicConfig(
       format=os.uname()[1].split('.')[0] + ' %(asctime)s %(message)s',
       datefmt='%m/%d %H:%M:%S',
-      handlers=[ch])
+      handlers=[ch, ch2])
 
 # Init datasets and dataloaders 
 def my_worker_init_fn(worker_id):
@@ -49,15 +52,29 @@ def load_state_with_same_shape(model, weights):
     print("Loading weights:" + ', '.join(filtered_weights.keys()))
     return filtered_weights
 
-@hydra.main(config_path='config', config_name='default.yaml')
+def load_config(config_path):
+    if '.json' in config_path:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    elif '.yaml' in config_path or '.yml' in config_path:
+        with open(config_path, 'r') as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
+    else:
+        raise NotImplementedError("Unsupported config filetype")
+    config = AttrDict(config)
+    return config
+
+
+#@hydra.main(config_path='config', config_name='default.yaml')
 def main(config):
       # load the configurations
     setup_logging()
     if os.path.exists('config.yaml'):
         logging.info('===> Loading exsiting config file')
-        config = OmegaConf.load('config.yaml')
+        #config = OmegaConf.load('config.yaml')
+        config = load_config('config.yaml')
         logging.info('===> Loaded exsiting config file')
-    logging.info(config.pretty())
+    logging.info(json.dumps(config, indent = 4))
 
     # Create Dataset and Dataloader
     if config.data.dataset == 'sunrgbd':
@@ -132,7 +149,7 @@ def main(config):
         Detector = MODEL.BoxNet
     else:
         Detector = MODEL.VoteNet
-
+    
     net = Detector(num_class=dataset_config.num_class,
                    num_heading_bin=dataset_config.num_heading_bin,
                    num_size_cluster=dataset_config.num_size_cluster,
@@ -162,8 +179,16 @@ def main(config):
     if config.net.is_train:
         train(net, train_dataloader, test_dataloader, dataset_config, config)
     else:
+        ##########
+        CHECKPOINT_PATH = os.path.join('checkpoint.tar')
+        if os.path.isfile(CHECKPOINT_PATH):
+            checkpoint = torch.load(CHECKPOINT_PATH)
+            net.load_state_dict(checkpoint['state_dict'])
+            logging.info("-> loaded checkpoint %s"%(CHECKPOINT_PATH))
+        ##########
         test(net, test_dataloader, dataset_config, config)
 
 if __name__ == "__main__":
-    main()
+    config = load_config('config/my_config.yaml')
+    main(config)
 

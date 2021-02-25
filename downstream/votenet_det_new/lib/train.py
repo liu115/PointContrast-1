@@ -24,10 +24,10 @@ from datetime import datetime
 import argparse
 import importlib
 import logging
-from omegaconf import OmegaConf
+#from omegaconf import OmegaConf
 
 from models.loss_helper import get_loss as criterion
-from tensorboardX import SummaryWriter
+#from tensorboardX import SummaryWriter
 
 import torch
 import torch.optim as optim
@@ -37,7 +37,7 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 from models.backbone.pointnet2.pytorch_utils import BNMomentumScheduler
-from models.dump_helper import dump_results
+##from models.dump_helper import dump_results
 from models.ap_helper import APCalculator, parse_predictions, parse_groundtruths
 
 
@@ -54,7 +54,8 @@ def adjust_learning_rate(optimizer, epoch, config):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-def train_one_epoch(net, train_dataloader, optimizer, bnm_scheduler, epoch_cnt, dataset_config, writer, config):
+##def train_one_epoch(net, train_dataloader, optimizer, bnm_scheduler, epoch_cnt, dataset_config, writer, config):
+def train_one_epoch(net, train_dataloader, optimizer, bnm_scheduler, epoch_cnt, dataset_config, config):
     stat_dict = {} # collect statistics
     adjust_learning_rate(optimizer, epoch_cnt, config)
     bnm_scheduler.step() # decay BN momentum
@@ -71,7 +72,7 @@ def train_one_epoch(net, train_dataloader, optimizer, bnm_scheduler, epoch_cnt, 
                 'voxel_coords': batch_data_label['voxel_coords'],
                 'voxel_inds':   batch_data_label['voxel_inds'],
                 'voxel_feats':  batch_data_label['voxel_feats']})
-
+        
         end_points = net(inputs)
         
         # Compute loss and gradients, update parameters.
@@ -91,14 +92,15 @@ def train_one_epoch(net, train_dataloader, optimizer, bnm_scheduler, epoch_cnt, 
         batch_interval = 10
         if (batch_idx+1) % batch_interval == 0:
             logging.info(' ---- batch: %03d ----' % (batch_idx+1))
-            for key in stat_dict:
-                writer.add_scalar('training/{}'.format(key), stat_dict[key]/batch_interval, 
-                                  (epoch_cnt*len(train_dataloader)+batch_idx)*config.data.batch_size)
+            ##for key in stat_dict:
+            ##    writer.add_scalar('training/{}'.format(key), stat_dict[key]/batch_interval, 
+            ##                      (epoch_cnt*len(train_dataloader)+batch_idx)*config.data.batch_size)
             for key in sorted(stat_dict.keys()):
                 logging.info('mean %s: %f'%(key, stat_dict[key]/batch_interval))
                 stat_dict[key] = 0
 
-def evaluate_one_epoch(net, train_dataloader, test_dataloader, config, epoch_cnt, CONFIG_DICT, writer):
+##def evaluate_one_epoch(net, train_dataloader, test_dataloader, config, epoch_cnt, CONFIG_DICT, writer):
+def evaluate_one_epoch(net, train_dataloader, test_dataloader, config, epoch_cnt, CONFIG_DICT):
     stat_dict = {} # collect statistics
     ap_calculator = APCalculator(ap_iou_thresh=0.5, class2type_map=CONFIG_DICT['dataset_config'].class2type)
     net.eval() # set model to eval mode (for bn and dp)
@@ -136,20 +138,20 @@ def evaluate_one_epoch(net, train_dataloader, test_dataloader, config, epoch_cnt
         ap_calculator.step(batch_pred_map_cls, batch_gt_map_cls)
 
         # Dump evaluation results for visualization
-        if config.data.dump_results and batch_idx == 0 and epoch_cnt %10 == 0:
-            dump_results(end_points, 'results', CONFIG_DICT['dataset_config']) 
+        ##if config.data.dump_results and batch_idx == 0 and epoch_cnt %10 == 0:
+        ##    dump_results(end_points, 'results', CONFIG_DICT['dataset_config']) 
 
     # Log statistics
     for key in sorted(stat_dict.keys()):
-        writer.add_scalar('validation/{}'.format(key), stat_dict[key]/float(batch_idx+1),
-                          (epoch_cnt+1)*len(train_dataloader)*config.data.batch_size)
+        ##writer.add_scalar('validation/{}'.format(key), stat_dict[key]/float(batch_idx+1),
+        ##                  (epoch_cnt+1)*len(train_dataloader)*config.data.batch_size)
         logging.info('eval mean %s: %f'%(key, stat_dict[key]/(float(batch_idx+1))))
 
     # Evaluate average precision
     metrics_dict = ap_calculator.compute_metrics()
     for key in metrics_dict:
         logging.info('eval %s: %f'%(key, metrics_dict[key]))
-    writer.add_scalar('validation/mAP@0.5', metrics_dict['mAP'], (epoch_cnt+1)*len(train_dataloader)*config.data.batch_size)
+    ##writer.add_scalar('validation/mAP@0.5', metrics_dict['mAP'], (epoch_cnt+1)*len(train_dataloader)*config.data.batch_size)
 
     mean_loss = stat_dict['loss']/float(batch_idx+1)
     return mean_loss
@@ -167,7 +169,7 @@ def train(net, train_dataloader, test_dataloader, dataset_config, config):
     optimizer = optim.Adam(net.parameters(), lr=config.optimizer.learning_rate, weight_decay=config.optimizer.weight_decay)
 
     # writer
-    writer = SummaryWriter(log_dir='tensorboard')
+    ##writer = SummaryWriter(log_dir='tensorboard')
 
     # Load checkpoint if there is any
     start_epoch = 0
@@ -197,12 +199,16 @@ def train(net, train_dataloader, test_dataloader, dataset_config, config):
         # Reset numpy seed.
         # REF: https://github.com/pytorch/pytorch/issues/5059
         np.random.seed()
+        ##train_one_epoch(net=net, train_dataloader=train_dataloader, optimizer=optimizer, 
+        ##                bnm_scheduler=bnm_scheduler, epoch_cnt=epoch, dataset_config=dataset_config, 
+        ##                writer=writer, config=config)
         train_one_epoch(net=net, train_dataloader=train_dataloader, optimizer=optimizer, 
-                        bnm_scheduler=bnm_scheduler, epoch_cnt=epoch, dataset_config=dataset_config, 
-                        writer=writer, config=config)
+                        bnm_scheduler=bnm_scheduler, epoch_cnt=epoch, dataset_config=dataset_config, config=config)
         if epoch == 0 or epoch % 5 == 4: # Eval every 5 epochs
+            ##loss = evaluate_one_epoch(net=net, train_dataloader=train_dataloader, test_dataloader=test_dataloader, 
+            ##                          config=config, epoch_cnt=epoch, CONFIG_DICT=CONFIG_DICT, writer=writer)
             loss = evaluate_one_epoch(net=net, train_dataloader=train_dataloader, test_dataloader=test_dataloader, 
-                                      config=config, epoch_cnt=epoch, CONFIG_DICT=CONFIG_DICT, writer=writer)
+                                      config=config, epoch_cnt=epoch, CONFIG_DICT=CONFIG_DICT)
         # Save checkpoint
         save_dict = {'epoch': epoch+1, # after training one epoch, the start_epoch should be epoch+1
                     'optimizer_state_dict': optimizer.state_dict(),
@@ -213,5 +219,5 @@ def train(net, train_dataloader, test_dataloader, dataset_config, config):
         except:
             save_dict['state_dict'] = net.state_dict()
         torch.save(save_dict, 'checkpoint.tar')
-        OmegaConf.save(config, 'config.yaml')
+        #OmegaConf.save(config, 'config.yaml')
 

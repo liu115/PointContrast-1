@@ -26,7 +26,7 @@ except:
 # Mesh IO
 import trimesh
 
-import matplotlib.pyplot as pyplot
+##import matplotlib.pyplot as pyplot
 
 # ----------------------------------------
 # Point Cloud Sampling
@@ -205,6 +205,8 @@ def write_ply(points, filename, text=True):
     el = PlyElement.describe(vertex, 'vertex', comments=['vertices'])
     PlyData([el], text=text).write(filename)
 
+##
+'''
 def write_ply_color(points, labels, filename, num_classes=None, colormap=pyplot.cm.jet):
     """ Color (N,3) points with labels (N) within range 0 ~ num_classes-1 as OBJ file """
     labels = labels.astype(int)
@@ -225,7 +227,8 @@ def write_ply_color(points, labels, filename, num_classes=None, colormap=pyplot.
     
     el = PlyElement.describe(vertex, 'vertex', comments=['vertices'])
     PlyData([el], text=True).write(filename)
-   
+''' 
+ 
 def write_ply_rgb(points, colors, out_filename, num_classes=None):
     """ Color (N,3) points with RGB colors (N,3) within range [0,255] as OBJ file """
     colors = colors.astype(int)
@@ -235,7 +238,8 @@ def write_ply_rgb(points, colors, out_filename, num_classes=None):
         c = colors[i,:]
         fout.write('v %f %f %f %d %d %d\n' % (points[i,0],points[i,1],points[i,2],c[0],c[1],c[2]))
     fout.close()
-
+##
+'''
 # ----------------------------------------
 # Simple Point cloud and Volume Renderers
 # ----------------------------------------
@@ -257,6 +261,7 @@ def pyplot_draw_volume(vol, output_filename):
     """
     points = volume_to_point_cloud(vol)
     pyplot_draw_point_cloud(points, output_filename)
+'''
 
 # ----------------------------------------
 # Simple Point manipulations
