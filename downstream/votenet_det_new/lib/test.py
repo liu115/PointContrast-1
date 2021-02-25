@@ -77,8 +77,8 @@ def test(net, test_dataloader, dataset_config, config):
             ap_calculator.step(batch_pred_map_cls, batch_gt_map_cls)
     
         # Dump evaluation results for visualization
-        if batch_idx == 0:
-            dump_results(end_points, 'visualization', CONFIG_DICT['dataset_config'])
+        ##if batch_idx == 0:
+        ##    dump_results(end_points, 'visualization', CONFIG_DICT['dataset_config'])
 
     # Log statistics
     for key in sorted(stat_dict.keys()):
