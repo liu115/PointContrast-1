@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-# 
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -9,7 +9,7 @@ import gc
 import logging
 import numpy as np
 import json
-from omegaconf import OmegaConf
+# from omegaconf import OmegaConf
 import torch.nn as nn
 
 import torch
@@ -55,7 +55,7 @@ def load_state(model, weights, lenient_weight_loading=False):
   if du.get_world_size() > 1:
       _model = model.module
   else:
-      _model = model  
+      _model = model
 
   if lenient_weight_loading:
     model_state = _model.state_dict()
@@ -146,7 +146,7 @@ class ContrastiveLossTrainer:
         self.writer = SummaryWriter(logdir='logs')
         if not os.path.exists('weights'):
           os.makedirs('weights', mode=0o755)
-        OmegaConf.save(config, 'config.yaml')
+        # OmegaConf.save(config, 'config.yaml')
 
   def _save_checkpoint(self, curr_iter, filename='checkpoint'):
     if not self.is_master:
@@ -175,7 +175,7 @@ class HardestContrastiveLossTrainer(ContrastiveLossTrainer):
       config,
       data_loader):
     ContrastiveLossTrainer.__init__(self, config, data_loader)
- 
+
     self.stat_freq = config.trainer.stat_freq
     self.lr_update_freq = config.trainer.lr_update_freq
 
@@ -211,7 +211,7 @@ class HardestContrastiveLossTrainer(ContrastiveLossTrainer):
     pos_ind0 = sample_pos_pairs[:, 0].long()
     pos_ind1 = sample_pos_pairs[:, 1].long()
     posF0, posF1 = F0[pos_ind0], F1[pos_ind1]
-    
+
     D01 = self.pdist(posF0, subF1)
     D10 = self.pdist(posF1, subF0)
 
@@ -243,7 +243,7 @@ class HardestContrastiveLossTrainer(ContrastiveLossTrainer):
     data_loader = self.data_loader
     data_loader_iter = self.data_loader.__iter__()
     data_meter, data_timer, total_timer = AverageMeter(), Timer(), Timer()
-    
+
     total_loss = 0
     total_num = 0.0
 
@@ -278,7 +278,7 @@ class HardestContrastiveLossTrainer(ContrastiveLossTrainer):
   def _train_iter(self, data_loader_iter, timers):
     self.model.train()
     data_meter, data_timer, total_timer = timers
-    
+
     self.optimizer.zero_grad()
     batch_pos_loss, batch_neg_loss, batch_loss = 0, 0, 0
     data_time = 0
@@ -308,7 +308,7 @@ class HardestContrastiveLossTrainer(ContrastiveLossTrainer):
     loss = pos_loss + neg_loss
 
     loss.backward()
-    
+
     result = {"loss": loss, "pos_loss": pos_loss, "neg_loss": neg_loss}
     if self.config.misc.num_gpus > 1:
       result = du.scaled_all_reduce_dict(result, self.config.misc.num_gpus)
@@ -332,12 +332,13 @@ class PointNCELossTrainer(ContrastiveLossTrainer):
       config,
       data_loader):
     ContrastiveLossTrainer.__init__(self, config, data_loader)
-    
+
     self.T = config.misc.nceT
     self.npos = config.misc.npos
 
     self.stat_freq = config.trainer.stat_freq
     self.lr_update_freq = config.trainer.lr_update_freq
+    self.save_freq = config.trainer.save_freq
 
   def train(self):
 
@@ -345,7 +346,7 @@ class PointNCELossTrainer(ContrastiveLossTrainer):
     data_loader = self.data_loader
     data_loader_iter = self.data_loader.__iter__()
     data_meter, data_timer, total_timer = AverageMeter(), Timer(), Timer()
-    
+
     total_loss = 0
     total_num = 0.0
 
@@ -362,6 +363,8 @@ class PointNCELossTrainer(ContrastiveLossTrainer):
         self.scheduler.step()
         if self.is_master:
           logging.info(f" Epoch: {epoch}, LR: {lr}")
+      if curr_iter % self.save_freq == 0:
+        if self.is_master:
           self._save_checkpoint(curr_iter, 'checkpoint_'+str(curr_iter))
 
       # Print logs
@@ -379,12 +382,12 @@ class PointNCELossTrainer(ContrastiveLossTrainer):
 
   def _train_iter(self, data_loader_iter, timers):
     data_meter, data_timer, total_timer = timers
-    
+
     self.optimizer.zero_grad()
     batch_pos_loss, batch_neg_loss, batch_loss = 0, 0, 0
     data_time = 0
     total_timer.tic()
-    
+
     data_timer.tic()
     input_dict = data_loader_iter.next()
     data_time += data_timer.toc(average=False)
@@ -399,7 +402,7 @@ class PointNCELossTrainer(ContrastiveLossTrainer):
 
     N0, N1 = input_dict['pcd0'].shape[0], input_dict['pcd1'].shape[0]
     pos_pairs = input_dict['correspondences'].to(self.cur_device)
-    
+
     q_unique, count = pos_pairs[:, 0].unique(return_counts=True)
     uniform = torch.distributions.Uniform(0, 1).sample([len(count)]).to(self.cur_device)
     off = torch.floor(uniform*count).long()
@@ -413,8 +416,8 @@ class PointNCELossTrainer(ContrastiveLossTrainer):
         sampled_inds = np.random.choice(q.shape[0], self.npos, replace=False)
         q = q[sampled_inds]
         k = k[sampled_inds]
-    
-    npos = q.shape[0] 
+
+    npos = q.shape[0]
 
     # pos logit
     logits = torch.mm(q, k.transpose(1, 0)) # npos by npos
