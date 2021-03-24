@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-#  
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -17,8 +17,10 @@ import sys
 import json
 import random
 import logging
-import hydra
-from omegaconf import OmegaConf
+import yaml
+import argparse
+# import hydra
+# from omegaconf import OmegaConf
 
 from easydict import EasyDict as edict
 
@@ -37,6 +39,13 @@ from lib import distributed_utils
 
 from models import load_model, load_wrapper
 
+
+def load_config(config_path):
+    with open(config_path, 'r') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    config = edict(config)
+    return config
+
 def setup_logging(config):
   ch = logging.StreamHandler(sys.stdout)
   if config.distributed.distributed_world_size > 1 and config.distributed.distributed_rank > 0:
@@ -52,9 +61,9 @@ def main(config, init_distributed=False):
 
   if not torch.cuda.is_available():
     raise Exception('No GPUs FOUND.')
-  
+
   # setup initial seed
-  torch.cuda.set_device(config.distributed.device_id)  
+  torch.cuda.set_device(config.distributed.device_id)
   torch.manual_seed(config.misc.seed)
   torch.cuda.manual_seed(config.misc.seed)
 
@@ -62,12 +71,13 @@ def main(config, init_distributed=False):
   distributed = config.distributed.distributed_world_size > 1
 
   if init_distributed:
+    print(config.distributed, flush=True)
     config.distributed.distributed_rank = distributed_utils.distributed_init(config.distributed)
 
   setup_logging(config)
 
   logging.info('===> Configurations')
-  logging.info(config.pretty())
+  logging.info(json.dumps(config, indent=4))
 
   DatasetClass = load_dataset(config.data.dataset)
   if config.test.test_original_pointcloud:
@@ -112,20 +122,20 @@ def main(config, init_distributed=False):
       num_in_channel = 3  # RGB color
 
     num_labels = train_data_loader.dataset.NUM_LABELS
-  
+
   else:
-    
+
     test_data_loader = initialize_data_loader(
         DatasetClass,
         config,
         num_workers=config.data.num_workers,
-        phase=config.data.test_phase,
+        phase=config.train.test_phase,
         augment_data=False,
         shuffle=False,
         repeat=False,
         batch_size=config.data.test_batch_size,
         limit_numpoints=False)
-    
+
     if test_data_loader.dataset.NUM_IN_CHANNEL is not None:
       num_in_channel = test_data_loader.dataset.NUM_IN_CHANNEL
     else:
@@ -146,7 +156,7 @@ def main(config, init_distributed=False):
         wrapper.__name__ + NetClass.__name__, count_parameters(model)))
 
   logging.info(model)
-  
+
   if config.net.weights == 'modelzoo':  # Load modelzoo weights if possible.
     logging.info('===> Loading modelzoo weights')
     model.preload_modelzoo()
@@ -156,11 +166,13 @@ def main(config, init_distributed=False):
     logging.info('===> Loading weights: ' + config.net.weights)
     # state = torch.load(config.weights)
     state = torch.load(config.net.weights, map_location=lambda s, l: default_restore_location(s, 'cpu'))
-   
+
     if 'state_dict' in state.keys():
       state_key_name = 'state_dict'
     elif 'model_state' in state.keys():
       state_key_name = 'model_state'
+    elif 'state_dict_3d' in state.keys():
+      state_key_name = 'state_dict_3d'
     else:
       raise NotImplementedError
 
@@ -180,7 +192,7 @@ def main(config, init_distributed=False):
     model = torch.nn.parallel.DistributedDataParallel(
       module=model, device_ids=[device], output_device=device,
       broadcast_buffers=False, bucket_cap_mb=config.distributed.bucket_cap_mb
-    ) 
+    )
 
   if config.train.is_train:
     train(model, train_data_loader, val_data_loader, config)
@@ -189,15 +201,15 @@ def main(config, init_distributed=False):
 
 
 
-@hydra.main(config_path='config', config_name='default.yaml')
+# @hydra.main(config_path='config', config_name='default.yaml')
 def cli_main(config):
   # load the configurations
   if config.train.resume:
-    resume_config = OmegaConf.load(os.path.join(config.train.resume, 'config.yaml'))
+    resume_config = load_config(config.train.resume)
     resume_config.train.resume = config.train.resume
 
-  if config.distributed.distributed_init_method is None:
-    distributed_utils.infer_init_method(config.distributed)
+  # if config.distributed.distributed_init_method is None:
+  #   distributed_utils.infer_init_method(config.distributed)
 
   if config.distributed.distributed_init_method is not None:
     # distributed training
@@ -236,8 +248,13 @@ def distributed_main(i, config, start_rank=0):
   main(config, init_distributed=True)
 
 if __name__ == '__main__':
-  __spec__ = None
-  os.environ['MKL_THREADING_LAYER'] = 'GNU'
-  
-  # start
-  cli_main()
+    __spec__ = None
+    os.environ['MKL_THREADING_LAYER'] = 'GNU'
+    os.environ['MASTER_ADDR'] = 'localhost'
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', required=True, help='path to the config files')
+    args = parser.parse_args()
+    config = load_config(args.config)
+    cli_main(config)
+

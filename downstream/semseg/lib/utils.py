@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-# 
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -23,11 +23,11 @@ def load_state_with_same_shape(model, weights):
   if list(weights.keys())[0].startswith('module.'):
     logging.info("Loading multigpu weights with module. prefix...")
     weights = {k.partition('module.')[2]:weights[k] for k in weights.keys()}
-  
+
   if list(weights.keys())[0].startswith('encoder.'):
     logging.info("Loading multigpu weights with encoder. prefix...")
     weights = {k.partition('encoder.')[2]:weights[k] for k in weights.keys()}
-  
+
   # print(weights.items())
   # print("===================")
   # print("===================")
@@ -35,9 +35,9 @@ def load_state_with_same_shape(model, weights):
   # print("===================")
   # print("===================")
   # print(model_state)
-  
+
   filtered_weights = {
-      k: v for k, v in weights.items() if k in model_state  and v.size() == model_state[k].size() 
+      k: v for k, v in weights.items() if k in model_state  and v.size() == model_state[k].size()
   }
   logging.info("Loading weights:" + ', '.join(filtered_weights.keys()))
   return filtered_weights
@@ -80,7 +80,8 @@ def checkpoint(model, optimizer, epoch, iteration, config, best_val=None, best_v
   if get_world_size() > 1 and get_rank() > 0:
     return
 
-  mkdir_p('weights')
+  checkpoint_dir = os.path.join('saved', config.name)
+  mkdir_p(checkpoint_dir)
   if config.train.overwrite_weights:
     if postfix is not None:
       filename = f"checkpoint_{config.net.wrapper_type}{config.net.model}{postfix}.pth"
@@ -88,7 +89,8 @@ def checkpoint(model, optimizer, epoch, iteration, config, best_val=None, best_v
       filename = f"checkpoint_{config.net.wrapper_type}{config.net.model}.pth"
   else:
     filename = f"checkpoint_{config.net.wrapper_type}{config.net.model}_iter_{iteration}.pth"
-  checkpoint_file = 'weights/' + filename
+  # checkpoint_file = 'weights/' + filename
+  checkpoint_file = os.path.join(checkpoint_dir, filename)
 
   _model = model.module if get_world_size() > 1 else model
   state = {
@@ -103,15 +105,15 @@ def checkpoint(model, optimizer, epoch, iteration, config, best_val=None, best_v
     state['best_val_iter'] = best_val_iter
 
   # save config
-  OmegaConf.save(config, 'config.yaml')
+  # OmegaConf.save(config, 'config.yaml')
 
   torch.save(state, checkpoint_file)
   logging.info(f"Checkpoint saved to {checkpoint_file}")
   # Delete symlink if it exists
-  if os.path.exists('weights/weights.pth'):
-    os.remove('weights/weights.pth')
+  # if os.path.exists('weights/weights.pth'):
+  #   os.remove('weights/weights.pth')
   # Create symlink
-  os.system('ln -s {} weights/weights.pth'.format(filename))
+  # os.system('ln -s {} weights/weights.pth'.format(filename))
 
 
 def precision_at_one(pred, target, ignore_label=255):

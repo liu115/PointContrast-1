@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-# 
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -9,7 +9,7 @@ import os.path as osp
 import torch
 from torch import nn
 from torch.serialization import default_restore_location
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 from lib.test import test
 from lib.utils import checkpoint, precision_at_one, \
@@ -39,21 +39,21 @@ def load_state(model, state):
   if get_world_size() > 1:
     _model = model.module
   else:
-    _model = model  
+    _model = model
   _model.load_state_dict(state)
 
 
 def train(model, data_loader, val_data_loader, config, transform_data_fn=None):
-  
+
   device = config.distributed.device_id
   distributed = get_world_size() > 1
-  
+
   # Set up the train flag for batch normalization
   model.train()
 
   # Configuration
   if not distributed or get_rank() == 0:
-    writer = SummaryWriter(log_dir='tensorboard')
+    writer = SummaryWriter(log_dir=f'logs/{config.name}')
   data_timer, iter_timer = Timer(), Timer()
   fw_timer, bw_timer, ddp_timer = Timer(), Timer(), Timer()
 
@@ -119,7 +119,7 @@ def train(model, data_loader, val_data_loader, config, transform_data_fn=None):
 
         # Feed forward
         fw_timer.tic()
-        
+
         inputs = (sinput,) if config.net.wrapper_type==None else (sinput, coords, color)
         # model.initialize_coords(*init_args)
         soutput = model(*inputs)
@@ -127,10 +127,10 @@ def train(model, data_loader, val_data_loader, config, transform_data_fn=None):
         target = target.long().to(device)
 
         loss = criterion(soutput.F, target.long())
-  
+
         # Compute and accumulate gradient
         loss /= config.optimizer.iter_size
-        
+
         pred = get_prediction(data_loader.dataset, soutput.F, target)
         score = precision_at_one(pred, target)
 
