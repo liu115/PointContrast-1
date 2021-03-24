@@ -1,0 +1,80 @@
+name: sunrgbd_default
+net:
+  model: votenet
+  is_train: false
+  backbone: sparseconv
+  # weights:
+  weights: saved/sunrgbd_default/checkpoint.tar
+  # weights: saved/sunrgbd_myppup_nt=0.04/checkpoint.tar
+  # weights: saved/sunrgbd_official_ptc/checkpoint.tar
+  # weights: saved/sunrgbd_myppup_moco_nt=0.04/checkpoint.tar
+  # weights: saved/sunrgbd_global_l2/checkpoint.tar
+  # weights: saved/sunrgbd_global_kd/checkpoint.tar
+  # weights: saved/sunrgbd_global_crd/checkpoint.tar
+  # weights: saved/sunrgbd_mypp_ade20k_nt=0.4/checkpoint.tar
+  # weights: saved/sunrgbd_my_ade20k_kd/checkpoint.tar
+  # weights: saved/sunrgbd_ade20k_kd_t=0.5_2/checkpoint.tar
+  # weights: saved/sunrgbd_ade20k_ppnce_nt=0.04/checkpoint.tar
+  num_target: 256
+  vote_factor: 1
+  # cluster_sampling: vote_fps
+  cluster_sampling: seed_fps
+
+data:
+  dataset: sunrgbd
+  data_ratio: 1.0
+  num_points: 20000
+  num_workers: 4
+  batch_size: 64
+  no_height: True
+  use_color: False
+  use_sunrgbd_v2: False
+  overwrite: False
+  dump_results: False
+  voxelization: True
+  voxel_size: 0.05
+  shuffle_datast: False
+
+optimizer:
+  max_epoch: 180
+  learning_rate: 0.001
+  lr_decay_steps: [80, 120, 160]
+  lr_decay_rates: [0.1, 0.1, 0.1]
+  weight_decay: 0
+  bn_decay_step: 20
+  bn_decay_rate: 0.5
+
+test:
+  # use_3d_nms: False
+  use_3d_nms: True    # Change default
+  # use_cls_nms: False
+  use_cls_nms: True   # Change default
+  use_old_type_nms: False
+  # per_class_proposal: False
+  per_class_proposal: True # Change default
+  nms_iou: 0.25
+  conf_thresh: 0.05
+  # faster_eval: False, #Faster evaluation by skippling empty bounding box removal.
+  faster_eval: True # Change default
+  ap_iou_thresholds: [0.25, 0.5]
+
+misc:
+  log_dir: log
+
+hydra:
+  run:
+    dir: ${misc.log_dir}
+  sweep:
+    dir: ${misc.log_dir}
+  launcher:
+    partition: dev 
+    submitit_folder: ${hydra.sweep.dir}/.submitit/%j
+    name: ${hydra.job.name}
+    timeout_min: 2000
+    cpus_per_task: 20
+    gpus_per_node: 1
+    tasks_per_node: 1
+    mem_gb: 256
+    nodes: 1
+    constraint: volta32gb
+    max_num_timeout: 3
