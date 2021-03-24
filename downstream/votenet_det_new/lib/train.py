@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-# 
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -24,10 +24,10 @@ from datetime import datetime
 import argparse
 import importlib
 import logging
-from omegaconf import OmegaConf
+# from omegaconf import OmegaConf
 
 from models.loss_helper import get_loss as criterion
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 import torch
 import torch.optim as optim
@@ -73,7 +73,7 @@ def train_one_epoch(net, train_dataloader, optimizer, bnm_scheduler, epoch_cnt, 
                 'voxel_feats':  batch_data_label['voxel_feats']})
 
         end_points = net(inputs)
-        
+
         # Compute loss and gradients, update parameters.
         for key in batch_data_label:
             assert(key not in end_points)
@@ -92,7 +92,7 @@ def train_one_epoch(net, train_dataloader, optimizer, bnm_scheduler, epoch_cnt, 
         if (batch_idx+1) % batch_interval == 0:
             logging.info(' ---- batch: %03d ----' % (batch_idx+1))
             for key in stat_dict:
-                writer.add_scalar('training/{}'.format(key), stat_dict[key]/batch_interval, 
+                writer.add_scalar('training/{}'.format(key), stat_dict[key]/batch_interval,
                                   (epoch_cnt*len(train_dataloader)+batch_idx)*config.data.batch_size)
             for key in sorted(stat_dict.keys()):
                 logging.info('mean %s: %f'%(key, stat_dict[key]/batch_interval))
@@ -107,7 +107,7 @@ def evaluate_one_epoch(net, train_dataloader, test_dataloader, config, epoch_cnt
             logging.info('Eval batch: %d'%(batch_idx))
         for key in batch_data_label:
             batch_data_label[key] = batch_data_label[key].cuda()
-        
+
         # Forward pass
         inputs = {'point_clouds': batch_data_label['point_clouds']}
         if 'voxel_coords' in batch_data_label:
@@ -131,13 +131,13 @@ def evaluate_one_epoch(net, train_dataloader, test_dataloader, config, epoch_cnt
                 if key not in stat_dict: stat_dict[key] = 0
                 stat_dict[key] += end_points[key].item()
 
-        batch_pred_map_cls = parse_predictions(end_points, CONFIG_DICT) 
-        batch_gt_map_cls = parse_groundtruths(end_points, CONFIG_DICT) 
+        batch_pred_map_cls = parse_predictions(end_points, CONFIG_DICT)
+        batch_gt_map_cls = parse_groundtruths(end_points, CONFIG_DICT)
         ap_calculator.step(batch_pred_map_cls, batch_gt_map_cls)
 
         # Dump evaluation results for visualization
         if config.data.dump_results and batch_idx == 0 and epoch_cnt %10 == 0:
-            dump_results(end_points, 'results', CONFIG_DICT['dataset_config']) 
+            dump_results(end_points, 'results', CONFIG_DICT['dataset_config'])
 
     # Log statistics
     for key in sorted(stat_dict.keys()):
@@ -167,11 +167,11 @@ def train(net, train_dataloader, test_dataloader, dataset_config, config):
     optimizer = optim.Adam(net.parameters(), lr=config.optimizer.learning_rate, weight_decay=config.optimizer.weight_decay)
 
     # writer
-    writer = SummaryWriter(log_dir='tensorboard')
+    writer = SummaryWriter(log_dir='logs/' + config.name)
 
     # Load checkpoint if there is any
     start_epoch = 0
-    CHECKPOINT_PATH = os.path.join('checkpoint.tar')
+    CHECKPOINT_PATH = os.path.join('saved', config.name, 'checkpoint.tar')
     if os.path.isfile(CHECKPOINT_PATH):
         checkpoint = torch.load(CHECKPOINT_PATH)
         net.load_state_dict(checkpoint['state_dict'])
@@ -197,11 +197,11 @@ def train(net, train_dataloader, test_dataloader, dataset_config, config):
         # Reset numpy seed.
         # REF: https://github.com/pytorch/pytorch/issues/5059
         np.random.seed()
-        train_one_epoch(net=net, train_dataloader=train_dataloader, optimizer=optimizer, 
-                        bnm_scheduler=bnm_scheduler, epoch_cnt=epoch, dataset_config=dataset_config, 
+        train_one_epoch(net=net, train_dataloader=train_dataloader, optimizer=optimizer,
+                        bnm_scheduler=bnm_scheduler, epoch_cnt=epoch, dataset_config=dataset_config,
                         writer=writer, config=config)
         if epoch == 0 or epoch % 5 == 4: # Eval every 5 epochs
-            loss = evaluate_one_epoch(net=net, train_dataloader=train_dataloader, test_dataloader=test_dataloader, 
+            loss = evaluate_one_epoch(net=net, train_dataloader=train_dataloader, test_dataloader=test_dataloader,
                                       config=config, epoch_cnt=epoch, CONFIG_DICT=CONFIG_DICT, writer=writer)
         # Save checkpoint
         save_dict = {'epoch': epoch+1, # after training one epoch, the start_epoch should be epoch+1
@@ -212,6 +212,9 @@ def train(net, train_dataloader, test_dataloader, dataset_config, config):
             save_dict['state_dict'] = net.module.state_dict()
         except:
             save_dict['state_dict'] = net.state_dict()
-        torch.save(save_dict, 'checkpoint.tar')
-        OmegaConf.save(config, 'config.yaml')
+        CHECKPOINT_DIR = os.path.join('saved', config.name)
+        if not os.path.exists(CHECKPOINT_DIR):
+            os.makedirs(CHECKPOINT_DIR)
+        CHECKPOINT_PATH = os.path.join(CHECKPOINT_DIR, 'checkpoint.tar')
+        torch.save(save_dict, CHECKPOINT_PATH)
 

@@ -1,24 +1,34 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-#  
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
 
 import torch
-import hydra
+# import hydra
 import logging
 import sys
 import os
 import numpy as np
 import torch.nn as nn
 import importlib
+import yaml
+import json
+from attrdict import AttrDict
+import argparse
 
-from omegaconf import OmegaConf
+# from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from torch.serialization import default_restore_location
 from lib.train import train
 from lib.test import test
 
+
+def load_config(config_path):
+    with open(config_path, 'r') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    config = AttrDict(config)
+    return config
 
 def setup_logging():
   ch = logging.StreamHandler(sys.stdout)
@@ -28,7 +38,7 @@ def setup_logging():
       datefmt='%m/%d %H:%M:%S',
       handlers=[ch])
 
-# Init datasets and dataloaders 
+# Init datasets and dataloaders
 def my_worker_init_fn(worker_id):
     np.random.seed(np.random.get_state()[1][0] + worker_id)
 
@@ -49,48 +59,43 @@ def load_state_with_same_shape(model, weights):
     print("Loading weights:" + ', '.join(filtered_weights.keys()))
     return filtered_weights
 
-@hydra.main(config_path='config', config_name='default.yaml')
 def main(config):
-      # load the configurations
+    # load the configurations
     setup_logging()
-    if os.path.exists('config.yaml'):
-        logging.info('===> Loading exsiting config file')
-        config = OmegaConf.load('config.yaml')
-        logging.info('===> Loaded exsiting config file')
-    logging.info(config.pretty())
+    logging.info(json.dumps(config, indent = 4))
 
     # Create Dataset and Dataloader
     if config.data.dataset == 'sunrgbd':
         from lib.datasets.sunrgbd.sunrgbd_detection_dataset import SunrgbdDetectionVotesDataset, MAX_NUM_OBJ
         from lib.datasets.sunrgbd.model_util_sunrgbd import SunrgbdDatasetConfig
         dataset_config = SunrgbdDatasetConfig()
-        train_dataset = SunrgbdDetectionVotesDataset('train', 
+        train_dataset = SunrgbdDetectionVotesDataset('train',
             num_points=config.data.num_points,
             augment=True,
-            use_color=config.data.use_color, 
+            use_color=config.data.use_color,
             use_height=(not config.data.no_height),
             use_v1=(not config.data.use_sunrgbd_v2),
             data_ratio=config.data.data_ratio)
-        test_dataset = SunrgbdDetectionVotesDataset('val', 
+        test_dataset = SunrgbdDetectionVotesDataset('val',
             num_points=config.data.num_points,
             augment=False,
-            use_color=config.data.use_color, 
+            use_color=config.data.use_color,
             use_height=(not config.data.no_height),
             use_v1=(not config.data.use_sunrgbd_v2))
     elif config.data.dataset == 'scannet':
         from lib.datasets.scannet.scannet_detection_dataset import ScannetDetectionDataset, MAX_NUM_OBJ
         from lib.datasets.scannet.model_util_scannet import ScannetDatasetConfig
         dataset_config = ScannetDatasetConfig()
-        train_dataset = ScannetDetectionDataset('train', 
+        train_dataset = ScannetDetectionDataset('train',
             num_points=config.data.num_points,
             augment=True,
-            use_color=config.data.use_color, 
+            use_color=config.data.use_color,
             use_height=(not config.data.no_height),
             data_ratio=config.data.data_ratio)
-        test_dataset = ScannetDetectionDataset('val', 
+        test_dataset = ScannetDetectionDataset('val',
             num_points=config.data.num_points,
             augment=False,
-            use_color=config.data.use_color, 
+            use_color=config.data.use_color,
             use_height=(not config.data.no_height))
     else:
         logging.info('Unknown dataset %s. Exiting...'%(config.data.dataset))
@@ -106,25 +111,26 @@ def main(config):
     logging.info('training: {}, testing: {}'.format(len(train_dataset), len(test_dataset)))
 
     train_dataloader = DataLoader(
-        train_dataset, 
+        train_dataset,
         batch_size=config.data.batch_size,
-        shuffle=True, 
-        num_workers=config.data.num_workers, 
+        shuffle=True,
+        num_workers=config.data.num_workers,
         worker_init_fn=my_worker_init_fn,
         collate_fn=COLLATE_FN)
 
     test_dataloader = DataLoader(
-        test_dataset, 
+        test_dataset,
         batch_size=config.data.num_workers,
-        shuffle=True, 
-        num_workers=config.data.num_workers, 
+        shuffle=True,
+        num_workers=config.data.num_workers,
         worker_init_fn=my_worker_init_fn,
         collate_fn=COLLATE_FN)
 
-    logging.info('train dataloader: {}, test dataloader: {}'.format(len(train_dataloader),len(test_dataloader)))
+    logging.info('train dataloader: {}, test dataloader: {}'.format(len(train_dataloader), len(test_dataloader)))
 
     # Init the model and optimzier
     MODEL = importlib.import_module('models.' + config.net.model) # import network module
+    assert torch.cuda.is_available()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     num_input_channel = int(config.data.use_color)*3 + int(not config.data.no_height)*1
 
@@ -150,7 +156,14 @@ def main(config):
         model = net
         if config.net.is_train:
             model = net.backbone_net.net
-        matched_weights = load_state_with_same_shape(model, state['state_dict'])
+
+        if 'state_dict' in state.keys():
+            state_dict = state['state_dict']
+        elif 'state_dict_3d' in state.keys():
+            state_dict = state['state_dict_3d']
+        else:
+            raise NotImplementedError("state dict key not found")
+        matched_weights = load_state_with_same_shape(model, state_dict)
         model_dict = model.state_dict()
         model_dict.update(matched_weights)
         model.load_state_dict(model_dict)
@@ -164,6 +177,11 @@ def main(config):
     else:
         test(net, test_dataloader, dataset_config, config)
 
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', required=True, help='path to the config files')
+    args = parser.parse_args()
+    config = load_config(args.config)
+    main(config)
 
